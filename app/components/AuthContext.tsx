@@ -3,6 +3,8 @@ import {
   dbService,
   GoogleAuthProvider,
   signInWithPopup,
+  signInWithRedirect,
+  getRedirectResult,
   onAuthStateChanged,
   firebaseSignOut,
 } from "../services/firebaseService";
@@ -51,6 +53,24 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return;
     }
 
+    // Capture the result of a redirect sign-in flow (if any)
+    getRedirectResult(auth)
+      .then((result) => {
+        if (result?.user) {
+          console.log("Successfully signed in via redirect:", result.user.email);
+        }
+      })
+      .catch((error) => {
+        console.error("Redirect sign-in error:", error);
+        if (error.code === "auth/unauthorized-domain") {
+          alert(
+            "Domain Unauthorized:\n\nPlease add this domain (student-marker.vercel.app) to your Firebase Console under 'Authentication' -> 'Settings' -> 'Authorized domains' to enable Google Sign-In."
+          );
+        } else {
+          alert(`Redirect Sign-in failed: ${error.message}`);
+        }
+      });
+
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       if (firebaseUser) {
         setUser(firebaseUser);
@@ -69,12 +89,30 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const signIn = async () => {
     const auth = dbService.getAuth();
     if (!auth) return;
+    const provider = new GoogleAuthProvider();
     try {
-      const provider = new GoogleAuthProvider();
       await signInWithPopup(auth, provider);
     } catch (error: any) {
-      if (error.code !== "auth/popup-closed-by-user") {
-        console.error("Sign-in error:", error);
+      console.warn("Sign-in with popup failed, checking fallback:", error.code, error.message);
+      if (error.code === "auth/popup-blocked") {
+        try {
+          await signInWithRedirect(auth, provider);
+        } catch (redirectError: any) {
+          console.error("Sign-in with redirect failed:", redirectError);
+          if (redirectError.code === "auth/unauthorized-domain") {
+            alert(
+              "Domain Unauthorized:\n\nPlease add this domain (student-marker.vercel.app) to your Firebase Console under 'Authentication' -> 'Settings' -> 'Authorized domains' to enable Google Sign-In."
+            );
+          } else {
+            alert(`Sign-in failed: ${redirectError.message}`);
+          }
+        }
+      } else if (error.code === "auth/unauthorized-domain") {
+        alert(
+          "Domain Unauthorized:\n\nPlease add this domain (student-marker.vercel.app) to your Firebase Console under 'Authentication' -> 'Settings' -> 'Authorized domains' to enable Google Sign-In."
+        );
+      } else if (error.code !== "auth/popup-closed-by-user") {
+        alert(`Sign-in failed: ${error.message}`);
       }
     }
   };

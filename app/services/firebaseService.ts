@@ -1,6 +1,6 @@
 import { initializeApp, getApps, getApp } from "firebase/app";
 import { getFirestore, doc, getDoc, setDoc, collection, getDocs, deleteDoc, onSnapshot } from "firebase/firestore";
-import { getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged, signOut as firebaseSignOut } from "firebase/auth";
+import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, onAuthStateChanged, signOut as firebaseSignOut } from "firebase/auth";
 import type { Auth, User } from "firebase/auth";
 
 export interface FirebaseConfig {
@@ -1282,5 +1282,5 @@ class StorageService {
 export const dbService = new StorageService();
 
 // Auth exports for use in AuthContext
-export { GoogleAuthProvider, signInWithPopup, onAuthStateChanged, firebaseSignOut };
+export { GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, onAuthStateChanged, firebaseSignOut };
 export type { Auth, User };

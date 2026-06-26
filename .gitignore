@@ -8,3 +8,4 @@
 
 # Firebase
 .firebase/
+.vercel
