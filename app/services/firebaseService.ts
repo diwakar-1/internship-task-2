@@ -1,5 +1,5 @@
 import { initializeApp, getApps, getApp } from "firebase/app";
-import { getFirestore, doc, getDoc, setDoc, collection, getDocs, deleteDoc, onSnapshot } from "firebase/firestore";
+import { getFirestore, doc, getDoc, setDoc, collection, getDocs, deleteDoc, onSnapshot, query, where } from "firebase/firestore";
 import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, onAuthStateChanged, signOut as firebaseSignOut } from "firebase/auth";
 import type { Auth, User } from "firebase/auth";
 
@@ -19,6 +19,7 @@ export interface StudentProfile {
   bio: string;
   email?: string;
   enrollmentYear?: string;
+  semester?: string;
   department?: string;
   firebaseConfig?: FirebaseConfig | null;
 }
@@ -32,6 +33,7 @@ export interface TimetableClass {
   startTime: string; // "09:00"
   endTime: string; // "10:30"
   color: string; // Tailwind class background
+  semester?: string;
 }
 
 export interface TaskItem {
@@ -43,7 +45,9 @@ export interface TaskItem {
   status: "todo" | "in-progress" | "completed";
   category: string;
   attachments?: Array<{ name: string; type: string; size: string; content?: string }>;
-  submissions?: Array<{ name: string; type: string; size: string; content: string; submittedAt: string }>;
+  submissions?: Array<{ name: string; type: string; size: string; content: string; submittedAt: string; studentName?: string; studentId?: string }>;
+  semester?: string;
+  isShared?: boolean;
 }
 
 export interface AttendanceRecord {
@@ -67,6 +71,8 @@ export interface NoteItem {
   category: string;
   updatedAt: string;
   attachments?: Array<{ name: string; type: string; size: string; dataUrl?: string }>;
+  semester?: string;
+  isShared?: boolean;
 }
 
 export interface NoticeItem {
@@ -75,12 +81,15 @@ export interface NoticeItem {
   description: string;
   date: string;
   type: "critical" | "warning" | "info";
+  semester?: string;
+  isShared?: boolean;
 }
 
 export interface StudentListItem {
   id: string;
   name: string;
   avatarUrl: string;
+  semester?: string;
 }
 
 const DEFAULT_PROFILE: StudentProfile = {
@@ -241,104 +250,317 @@ class StorageService {
     return this.isFirebaseConnected;
   }
 
+  // Resolves IndexedDB refs for task attachments/submissions
+  private async resolveTaskIndexedDBRefs(task: TaskItem): Promise<TaskItem> {
+    const resolvedAttachments = task.attachments ? await Promise.all(task.attachments.map(async (attach) => {
+      if (attach.content && attach.content.startsWith("indexeddb:")) {
+        const fileKey = attach.content.replace("indexeddb:", "");
+        try {
+          const content = await this.indexedDB.getItem(fileKey);
+          if (content) {
+            return { ...attach, content };
+          }
+        } catch (err) {
+          console.warn("Failed to load attachment from IndexedDB:", err);
+        }
+      }
+      return attach;
+    })) : undefined;
+
+    const resolvedSubmissions = task.submissions ? await Promise.all(task.submissions.map(async (sub) => {
+      if (sub.content && sub.content.startsWith("indexeddb:")) {
+        const fileKey = sub.content.replace("indexeddb:", "");
+        try {
+          const content = await this.indexedDB.getItem(fileKey);
+          if (content) {
+            return { ...sub, content };
+          }
+        } catch (err) {
+          console.warn("Failed to load submission from IndexedDB:", err);
+        }
+      }
+      return sub;
+    })) : undefined;
+
+    return {
+      ...task,
+      ...(resolvedAttachments && { attachments: resolvedAttachments }),
+      ...(resolvedSubmissions && { submissions: resolvedSubmissions })
+    };
+  }
+
+  // Resolves IndexedDB refs for note attachments
+  private async resolveNoteIndexedDBRefs(note: NoteItem): Promise<NoteItem> {
+    if (note.attachments) {
+      const resolvedAttachments = await Promise.all(note.attachments.map(async (attach) => {
+        if (attach.dataUrl && attach.dataUrl.startsWith("indexeddb:")) {
+          const fileKey = attach.dataUrl.replace("indexeddb:", "");
+          try {
+            const dataUrl = await this.indexedDB.getItem(fileKey);
+            if (dataUrl) {
+              return { ...attach, dataUrl };
+            }
+          } catch (err) {
+            console.warn("Failed to load attachment from IndexedDB:", err);
+          }
+        }
+        return attach;
+      }));
+      return { ...note, attachments: resolvedAttachments };
+    }
+    return note;
+  }
+
+  // Merges private task overrides with shared tasks
+  private mergeTasks(privateTasks: TaskItem[], sharedTasks: TaskItem[]): TaskItem[] {
+    const merged: TaskItem[] = [];
+    sharedTasks.forEach(shared => {
+      const override = privateTasks.find(p => p.id === shared.id);
+      if (override) {
+        merged.push({
+          ...shared,
+          status: override.status,
+          submissions: override.submissions || [],
+          isShared: true
+        });
+      } else {
+        merged.push({
+          ...shared,
+          status: "todo",
+          submissions: [],
+          isShared: true
+        });
+      }
+    });
+    // Add private tasks that are not overrides
+    privateTasks.forEach(p => {
+      if (!sharedTasks.some(s => s.id === p.id)) {
+        merged.push({ ...p, isShared: false });
+      }
+    });
+    return merged;
+  }
+
+  // Merges private notes with shared notes
+  private mergeNotes(privateNotes: NoteItem[], sharedNotes: NoteItem[]): NoteItem[] {
+    const merged: NoteItem[] = [];
+    sharedNotes.forEach(sn => {
+      merged.push({ ...sn, isShared: true });
+    });
+    privateNotes.forEach(pn => {
+      if (!sharedNotes.some(s => s.id === pn.id)) {
+        merged.push({ ...pn, isShared: false });
+      }
+    });
+    return merged;
+  }
+
   // Listen to tasks in realtime
-  public subscribeTasks(callback: (tasks: TaskItem[]) => void): (() => void) | null {
+  public subscribeTasks(
+    callback: (tasks: TaskItem[]) => void,
+    semester?: string
+  ): (() => void) | null {
     if (this.isFirebaseConnected && this.db) {
-      const colRef = collection(this.db, "users", this.userId, "tasks");
-      const unsubscribe = onSnapshot(colRef, async (querySnapshot) => {
+      let activeSemester = semester;
+      let privateTasks: TaskItem[] = [];
+      let sharedTasks: TaskItem[] = [];
+      
+      const triggerMerge = () => {
+        const merged = this.mergeTasks(privateTasks, sharedTasks);
+        callback(merged);
+      };
+      
+      const unsubscribes: Array<() => void> = [];
+      
+      // 1. Subscribe to private tasks
+      const privateColRef = collection(this.db, "users", this.userId, "tasks");
+      const unsubPrivate = onSnapshot(privateColRef, async (querySnapshot) => {
         const tasks: TaskItem[] = [];
         querySnapshot.forEach((doc) => {
           tasks.push({ id: doc.id, ...doc.data() } as TaskItem);
         });
-        // Resolve IndexedDB references if any (similar to getTasks)
-        const resolved = await Promise.all(tasks.map(async (task) => {
-          const resolvedAttachments = task.attachments ? await Promise.all(task.attachments.map(async (attach) => {
-            if (attach.content && attach.content.startsWith("indexeddb:")) {
-              const fileKey = attach.content.replace("indexeddb:", "");
-              try {
-                const content = await this.indexedDB.getItem(fileKey);
-                if (content) {
-                  return { ...attach, content };
-                }
-              } catch (err) {
-                console.warn("Failed to load attachment from IndexedDB:", err);
-              }
-            }
-            return attach;
-          })) : undefined;
-
-          const resolvedSubmissions = task.submissions ? await Promise.all(task.submissions.map(async (sub) => {
-            if (sub.content && sub.content.startsWith("indexeddb:")) {
-              const fileKey = sub.content.replace("indexeddb:", "");
-              try {
-                const content = await this.indexedDB.getItem(fileKey);
-                if (content) {
-                  return { ...sub, content };
-                }
-              } catch (err) {
-                console.warn("Failed to load submission from IndexedDB:", err);
-              }
-            }
-            return sub;
-          })) : undefined;
-
-          return {
-            ...task,
-            ...(resolvedAttachments && { attachments: resolvedAttachments }),
-            ...(resolvedSubmissions && { submissions: resolvedSubmissions })
-          };
-        }));
-        callback(resolved);
-      }, (error) => {
-        console.warn("Realtime tasks subscription error:", error);
+        privateTasks = await Promise.all(tasks.map(t => this.resolveTaskIndexedDBRefs(t)));
+        triggerMerge();
       });
-      return unsubscribe;
+      unsubscribes.push(unsubPrivate);
+      
+      // 2. Subscribe to shared tasks
+      const setupSharedSub = async () => {
+        if (!activeSemester) {
+          try {
+            const profile = await this.getProfile();
+            activeSemester = profile.semester || "";
+          } catch (e) {
+            console.warn("Failed to fetch profile for tasks sub:", e);
+          }
+        }
+        
+        if (activeSemester) {
+          const sharedColRef = collection(this.db, "shared_tasks");
+          const q = query(sharedColRef, where("semester", "==", activeSemester));
+          const unsubShared = onSnapshot(q, async (querySnapshot) => {
+            const tasks: TaskItem[] = [];
+            querySnapshot.forEach((doc) => {
+              tasks.push({ id: doc.id, ...doc.data() } as TaskItem);
+            });
+            sharedTasks = await Promise.all(tasks.map(t => this.resolveTaskIndexedDBRefs(t)));
+            triggerMerge();
+          });
+          unsubscribes.push(unsubShared);
+        }
+      };
+      
+      setupSharedSub();
+      
+      return () => {
+        unsubscribes.forEach((unsub) => unsub());
+      };
     }
+    
+    // Fallback for LocalStorage
+    this.getTasks(semester).then(callback);
     return null;
   }
 
   // Listen to classes in realtime
-  public subscribeClasses(callback: (classes: TimetableClass[]) => void): (() => void) | null {
+  public subscribeClasses(
+    callback: (classes: TimetableClass[]) => void,
+    semester?: string
+  ): (() => void) | null {
     if (this.isFirebaseConnected && this.db) {
       const colRef = collection(this.db, "classes");
-      return onSnapshot(colRef, (querySnapshot) => {
+      
+      const handleSnapshot = async (querySnapshot: any) => {
+        let activeSemester = semester;
+        if (!activeSemester) {
+          try {
+            const profile = await this.getProfile();
+            activeSemester = profile.semester || "";
+          } catch (e) {
+            console.warn("Failed to fetch profile for classes sub:", e);
+          }
+        }
+        
         const list: TimetableClass[] = [];
-        querySnapshot.forEach((doc) => {
-          list.push({ id: doc.id, ...doc.data() } as TimetableClass);
+        querySnapshot.forEach((doc: any) => {
+          const data = doc.data();
+          if (!activeSemester || data.semester === activeSemester) {
+            list.push({ id: doc.id, ...data } as TimetableClass);
+          }
         });
         callback(list);
+      };
+
+      return onSnapshot(colRef, (querySnapshot) => {
+        handleSnapshot(querySnapshot);
       });
     }
+    
+    this.getClasses(semester).then(callback);
     return null;
   }
 
   // Listen to notices in realtime
-  public subscribeNotices(callback: (notices: NoticeItem[]) => void): (() => void) | null {
+  public subscribeNotices(
+    callback: (notices: NoticeItem[]) => void,
+    semester?: string
+  ): (() => void) | null {
     if (this.isFirebaseConnected && this.db) {
-      const colRef = collection(this.db, "users", this.userId, "notices");
-      return onSnapshot(colRef, (querySnapshot) => {
+      const colRef = collection(this.db, "shared_notices");
+      
+      const handleSnapshot = async (querySnapshot: any) => {
+        let activeSemester = semester;
+        if (!activeSemester) {
+          try {
+            const profile = await this.getProfile();
+            activeSemester = profile.semester || "";
+          } catch (e) {
+            console.warn("Failed to fetch profile for notices sub:", e);
+          }
+        }
+        
         const list: NoticeItem[] = [];
-        querySnapshot.forEach((doc) => {
-          list.push({ id: doc.id, ...doc.data() } as NoticeItem);
+        querySnapshot.forEach((doc: any) => {
+          const data = doc.data();
+          if (!activeSemester || data.semester === activeSemester) {
+            list.push({ id: doc.id, ...data } as NoticeItem);
+          }
         });
         callback(list);
+      };
+
+      return onSnapshot(colRef, (querySnapshot) => {
+        handleSnapshot(querySnapshot);
       });
     }
+    
+    this.getNotices(semester).then(callback);
     return null;
   }
 
   // Listen to notes in realtime
-  public subscribeNotes(callback: (notes: NoteItem[]) => void): (() => void) | null {
+  public subscribeNotes(
+    callback: (notes: NoteItem[]) => void,
+    semester?: string
+  ): (() => void) | null {
     if (this.isFirebaseConnected && this.db) {
-      const colRef = collection(this.db, "users", this.userId, "notes");
-      return onSnapshot(colRef, (querySnapshot) => {
-        const list: NoteItem[] = [];
+      let activeSemester = semester;
+      let privateNotes: NoteItem[] = [];
+      let sharedNotes: NoteItem[] = [];
+      
+      const triggerMerge = () => {
+        const merged = this.mergeNotes(privateNotes, sharedNotes);
+        callback(merged);
+      };
+      
+      const unsubscribes: Array<() => void> = [];
+      
+      // 1. Subscribe to private notes
+      const privateColRef = collection(this.db, "users", this.userId, "notes");
+      const unsubPrivate = onSnapshot(privateColRef, async (querySnapshot) => {
+        const notes: NoteItem[] = [];
         querySnapshot.forEach((doc) => {
-          list.push({ id: doc.id, ...doc.data() } as NoteItem);
+          notes.push({ id: doc.id, ...doc.data() } as NoteItem);
         });
-        callback(list);
+        privateNotes = await Promise.all(notes.map(n => this.resolveNoteIndexedDBRefs(n)));
+        triggerMerge();
       });
+      unsubscribes.push(unsubPrivate);
+      
+      // 2. Subscribe to shared notes
+      const setupSharedSub = async () => {
+        if (!activeSemester) {
+          try {
+            const profile = await this.getProfile();
+            activeSemester = profile.semester || "";
+          } catch (e) {
+            console.warn("Failed to fetch profile for notes sub:", e);
+          }
+        }
+        
+        if (activeSemester) {
+          const sharedColRef = collection(this.db, "shared_notes");
+          const q = query(sharedColRef, where("semester", "==", activeSemester));
+          const unsubShared = onSnapshot(q, async (querySnapshot) => {
+            const notes: NoteItem[] = [];
+            querySnapshot.forEach((doc) => {
+              notes.push({ id: doc.id, ...doc.data() } as NoteItem);
+            });
+            sharedNotes = await Promise.all(notes.map(n => this.resolveNoteIndexedDBRefs(n)));
+            triggerMerge();
+          });
+          unsubscribes.push(unsubShared);
+        }
+      };
+      
+      setupSharedSub();
+      
+      return () => {
+        unsubscribes.forEach((unsub) => unsub());
+      };
     }
+    
+    this.getNotes(semester).then(callback);
     return null;
   }
 
@@ -354,6 +576,7 @@ class StorageService {
             id: docSnap.id,
             name: data.name || "Unknown Student",
             avatarUrl: data.avatarUrl || "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=256",
+            semester: data.semester || "",
           });
         });
         // Merge with default student list
@@ -439,13 +662,26 @@ class StorageService {
   }
 
   // Get all classes
-  public async getClasses(): Promise<TimetableClass[]> {
+  public async getClasses(semester?: string): Promise<TimetableClass[]> {
+    let activeSemester = semester;
+    if (!activeSemester) {
+      try {
+        const profile = await this.getProfile();
+        activeSemester = profile.semester || "";
+      } catch (e) {
+        console.warn("Failed to get profile semester in getClasses:", e);
+      }
+    }
+
     if (this.isFirebaseConnected && this.db) {
       try {
         const querySnapshot = await getDocs(collection(this.db, "classes"));
         const classes: TimetableClass[] = [];
         querySnapshot.forEach((doc) => {
-          classes.push({ id: doc.id, ...doc.data() } as TimetableClass);
+          const data = doc.data();
+          if (!activeSemester || data.semester === activeSemester) {
+            classes.push({ id: doc.id, ...data } as TimetableClass);
+          }
         });
         return classes;
       } catch (e) {
@@ -455,8 +691,10 @@ class StorageService {
 
     if (typeof window !== "undefined") {
       const stored = localStorage.getItem("student_classes");
-      if (stored) return JSON.parse(stored);
-      // seed
+      if (stored) {
+        const list = JSON.parse(stored) as TimetableClass[];
+        return activeSemester ? list.filter(c => c.semester === activeSemester) : list;
+      }
       localStorage.setItem("student_classes", JSON.stringify(DEFAULT_CLASSES));
     }
     return DEFAULT_CLASSES;
@@ -464,7 +702,7 @@ class StorageService {
 
   // Save a class (create or update)
   public async saveClass(cls: TimetableClass): Promise<void> {
-    const classes = await this.getClasses();
+    const classes = await this.getClasses(cls.semester);
     const index = classes.findIndex((c) => c.id === cls.id);
     if (index >= 0) {
       classes[index] = cls;
@@ -473,7 +711,17 @@ class StorageService {
     }
 
     if (typeof window !== "undefined") {
-      localStorage.setItem("student_classes", JSON.stringify(classes));
+      // Save all classes in LocalStorage but update the merged list
+      const stored = localStorage.getItem("student_classes");
+      let allCls: TimetableClass[] = [];
+      if (stored) allCls = JSON.parse(stored);
+      const idxAll = allCls.findIndex(c => c.id === cls.id);
+      if (idxAll >= 0) {
+        allCls[idxAll] = cls;
+      } else {
+        allCls.push(cls);
+      }
+      localStorage.setItem("student_classes", JSON.stringify(allCls));
     }
 
     if (this.isFirebaseConnected && this.db) {
@@ -492,11 +740,13 @@ class StorageService {
 
   // Delete a class
   public async deleteClass(id: string): Promise<void> {
-    const classes = await this.getClasses();
-    const updated = classes.filter((c) => c.id !== id);
-
     if (typeof window !== "undefined") {
-      localStorage.setItem("student_classes", JSON.stringify(updated));
+      const stored = localStorage.getItem("student_classes");
+      if (stored) {
+        const allCls = JSON.parse(stored) as TimetableClass[];
+        const updated = allCls.filter((c) => c.id !== id);
+        localStorage.setItem("student_classes", JSON.stringify(updated));
+      }
     }
 
     if (this.isFirebaseConnected && this.db) {
@@ -509,71 +759,62 @@ class StorageService {
   }
 
   // Tasks operations
-  public async getTasks(): Promise<TaskItem[]> {
-    let tasks: TaskItem[] = [];
-    let fetchedFromFirebase = false;
+  public async getTasks(semester?: string): Promise<TaskItem[]> {
+    let activeSemester = semester;
+    if (!activeSemester) {
+      try {
+        const profile = await this.getProfile();
+        activeSemester = profile.semester || "";
+      } catch (e) {
+        console.warn("Failed to get profile semester in getTasks:", e);
+      }
+    }
+
+    let privateTasks: TaskItem[] = [];
+    let sharedTasks: TaskItem[] = [];
+
+    // 1. Fetch private tasks
     if (this.isFirebaseConnected && this.db) {
       try {
         const querySnapshot = await getDocs(collection(this.db, "users", this.userId, "tasks"));
         querySnapshot.forEach((doc) => {
-          tasks.push({ id: doc.id, ...doc.data() } as TaskItem);
+          privateTasks.push({ id: doc.id, ...doc.data() } as TaskItem);
         });
-        fetchedFromFirebase = true;
       } catch (e) {
-        console.warn("Error fetching tasks from Firebase, fallback to LocalStorage", e);
+        console.warn("Error fetching private tasks from Firebase:", e);
       }
-    }
-
-    if (!fetchedFromFirebase && typeof window !== "undefined") {
+    } else if (typeof window !== "undefined") {
       const stored = localStorage.getItem("student_tasks");
-      if (stored) {
-        tasks = JSON.parse(stored);
-      } else {
-        localStorage.setItem("student_tasks", JSON.stringify(DEFAULT_TASKS));
-        tasks = DEFAULT_TASKS;
+      if (stored) privateTasks = JSON.parse(stored);
+    }
+
+    // 2. Fetch shared tasks
+    if (activeSemester) {
+      if (this.isFirebaseConnected && this.db) {
+        try {
+          const q = query(collection(this.db, "shared_tasks"), where("semester", "==", activeSemester));
+          const querySnapshot = await getDocs(q);
+          querySnapshot.forEach((doc) => {
+            sharedTasks.push({ id: doc.id, ...doc.data() } as TaskItem);
+          });
+        } catch (e) {
+          console.warn("Error fetching shared tasks from Firebase:", e);
+        }
+      } else if (typeof window !== "undefined") {
+        const stored = localStorage.getItem("student_shared_tasks");
+        if (stored) {
+          const allShared = JSON.parse(stored) as TaskItem[];
+          sharedTasks = allShared.filter(t => t.semester === activeSemester);
+        }
       }
     }
 
-    // Resolve IndexedDB references in attachments and submissions
-    const resolvedTasks = await Promise.all(tasks.map(async (task) => {
-      const resolvedAttachments = task.attachments ? await Promise.all(task.attachments.map(async (attach) => {
-        if (attach.content && attach.content.startsWith("indexeddb:")) {
-          const fileKey = attach.content.replace("indexeddb:", "");
-          try {
-            const content = await this.indexedDB.getItem(fileKey);
-            if (content) {
-              return { ...attach, content };
-            }
-          } catch (err) {
-            console.warn("Failed to load attachment from IndexedDB:", err);
-          }
-        }
-        return attach;
-      })) : undefined;
+    // 3. Resolve IndexedDB refs
+    const resolvedPrivate = await Promise.all(privateTasks.map(t => this.resolveTaskIndexedDBRefs(t)));
+    const resolvedShared = await Promise.all(sharedTasks.map(t => this.resolveTaskIndexedDBRefs(t)));
 
-      const resolvedSubmissions = task.submissions ? await Promise.all(task.submissions.map(async (sub) => {
-        if (sub.content && sub.content.startsWith("indexeddb:")) {
-          const fileKey = sub.content.replace("indexeddb:", "");
-          try {
-            const content = await this.indexedDB.getItem(fileKey);
-            if (content) {
-              return { ...sub, content };
-            }
-          } catch (err) {
-            console.warn("Failed to load submission from IndexedDB:", err);
-          }
-        }
-        return sub;
-      })) : undefined;
-
-      return {
-        ...task,
-        ...(resolvedAttachments && { attachments: resolvedAttachments }),
-        ...(resolvedSubmissions && { submissions: resolvedSubmissions })
-      };
-    }));
-
-    return resolvedTasks;
+    // 4. Merge
+    return this.mergeTasks(resolvedPrivate, resolvedShared);
   }
 
   public async saveTask(task: TaskItem): Promise<void> {
@@ -757,54 +998,62 @@ class StorageService {
   }
 
   // Notes operations
-  public async getNotes(): Promise<NoteItem[]> {
-    let notes: NoteItem[] = [];
-    let fetchedFromFirebase = false;
+  public async getNotes(semester?: string): Promise<NoteItem[]> {
+    let activeSemester = semester;
+    if (!activeSemester) {
+      try {
+        const profile = await this.getProfile();
+        activeSemester = profile.semester || "";
+      } catch (e) {
+        console.warn("Failed to get profile semester in getNotes:", e);
+      }
+    }
+
+    let privateNotes: NoteItem[] = [];
+    let sharedNotes: NoteItem[] = [];
+
+    // 1. Fetch private notes
     if (this.isFirebaseConnected && this.db) {
       try {
         const querySnapshot = await getDocs(collection(this.db, "users", this.userId, "notes"));
         querySnapshot.forEach((doc) => {
-          notes.push({ id: doc.id, ...doc.data() } as NoteItem);
+          privateNotes.push({ id: doc.id, ...doc.data() } as NoteItem);
         });
-        fetchedFromFirebase = true;
       } catch (e) {
-        console.warn("Error fetching notes from Firebase, fallback to LocalStorage", e);
+        console.warn("Error fetching private notes from Firebase:", e);
       }
-    }
-
-    if (!fetchedFromFirebase && typeof window !== "undefined") {
+    } else if (typeof window !== "undefined") {
       const stored = localStorage.getItem("student_notes");
-      if (stored) {
-        notes = JSON.parse(stored);
-      } else {
-        localStorage.setItem("student_notes", JSON.stringify(DEFAULT_NOTES));
-        notes = DEFAULT_NOTES;
+      if (stored) privateNotes = JSON.parse(stored);
+    }
+
+    // 2. Fetch shared notes
+    if (activeSemester) {
+      if (this.isFirebaseConnected && this.db) {
+        try {
+          const q = query(collection(this.db, "shared_notes"), where("semester", "==", activeSemester));
+          const querySnapshot = await getDocs(q);
+          querySnapshot.forEach((doc) => {
+            sharedNotes.push({ id: doc.id, ...doc.data() } as NoteItem);
+          });
+        } catch (e) {
+          console.warn("Error fetching shared notes from Firebase:", e);
+        }
+      } else if (typeof window !== "undefined") {
+        const stored = localStorage.getItem("student_shared_notes");
+        if (stored) {
+          const allShared = JSON.parse(stored) as NoteItem[];
+          sharedNotes = allShared.filter(n => n.semester === activeSemester);
+        }
       }
     }
 
-    // Resolve any IndexedDB attachments
-    const resolvedNotes = await Promise.all(notes.map(async (note) => {
-      if (note.attachments) {
-        const resolvedAttachments = await Promise.all(note.attachments.map(async (attach) => {
-          if (attach.dataUrl && attach.dataUrl.startsWith("indexeddb:")) {
-            const fileKey = attach.dataUrl.replace("indexeddb:", "");
-            try {
-              const dataUrl = await this.indexedDB.getItem(fileKey);
-              if (dataUrl) {
-                return { ...attach, dataUrl };
-              }
-            } catch (err) {
-              console.warn("Failed to load attachment from IndexedDB:", err);
-            }
-          }
-          return attach;
-        }));
-        return { ...note, attachments: resolvedAttachments };
-      }
-      return note;
-    }));
+    // 3. Resolve IndexedDB refs
+    const resolvedPrivate = await Promise.all(privateNotes.map(n => this.resolveNoteIndexedDBRefs(n)));
+    const resolvedShared = await Promise.all(sharedNotes.map(n => this.resolveNoteIndexedDBRefs(n)));
 
-    return resolvedNotes;
+    // 4. Merge
+    return this.mergeNotes(resolvedPrivate, resolvedShared);
   }
 
   public async saveNote(note: NoteItem): Promise<void> {
@@ -966,14 +1215,27 @@ class StorageService {
   }
 
   // Notices operations
-  public async getNotices(): Promise<NoticeItem[]> {
+  public async getNotices(semester?: string): Promise<NoticeItem[]> {
+    let activeSemester = semester;
+    if (!activeSemester) {
+      try {
+        const profile = await this.getProfile();
+        activeSemester = profile.semester || "";
+      } catch (e) {
+        console.warn("Failed to get profile semester in getNotices:", e);
+      }
+    }
+
     if (this.isFirebaseConnected && this.db) {
       try {
-        const querySnapshot = await getDocs(collection(this.db, "users", this.userId, "notices"));
         const notices: NoticeItem[] = [];
-        querySnapshot.forEach((doc) => {
-          notices.push({ id: doc.id, ...doc.data() } as NoticeItem);
-        });
+        if (activeSemester) {
+          const q = query(collection(this.db, "shared_notices"), where("semester", "==", activeSemester));
+          const querySnapshot = await getDocs(q);
+          querySnapshot.forEach((doc) => {
+            notices.push({ id: doc.id, ...doc.data() } as NoticeItem);
+          });
+        }
         return notices;
       } catch (e) {
         console.warn("Error fetching notices from Firebase, fallback to LocalStorage", e);
@@ -982,28 +1244,32 @@ class StorageService {
 
     if (typeof window !== "undefined") {
       const stored = localStorage.getItem("student_notices");
-      if (stored) return JSON.parse(stored);
+      if (stored) {
+        const list = JSON.parse(stored) as NoticeItem[];
+        return activeSemester ? list.filter(n => n.semester === activeSemester) : list;
+      }
       localStorage.setItem("student_notices", JSON.stringify(DEFAULT_NOTICES));
     }
     return DEFAULT_NOTICES;
   }
 
   public async saveNotice(notice: NoticeItem): Promise<void> {
-    const notices = await this.getNotices();
-    const index = notices.findIndex((n) => n.id === notice.id);
-    if (index >= 0) {
-      notices[index] = notice;
-    } else {
-      notices.push(notice);
-    }
-
     if (typeof window !== "undefined") {
-      localStorage.setItem("student_notices", JSON.stringify(notices));
+      const stored = localStorage.getItem("student_notices");
+      let allNotices: NoticeItem[] = [];
+      if (stored) allNotices = JSON.parse(stored);
+      const index = allNotices.findIndex((n) => n.id === notice.id);
+      if (index >= 0) {
+        allNotices[index] = notice;
+      } else {
+        allNotices.push(notice);
+      }
+      localStorage.setItem("student_notices", JSON.stringify(allNotices));
     }
 
     if (this.isFirebaseConnected && this.db) {
       try {
-        await setDoc(doc(this.db, "users", this.userId, "notices", notice.id), notice);
+        await setDoc(doc(this.db, "shared_notices", notice.id), notice);
       } catch (e) {
         console.warn("Error saving notice to Firebase:", e);
       }
@@ -1016,16 +1282,18 @@ class StorageService {
   }
 
   public async deleteNotice(id: string): Promise<void> {
-    const notices = await this.getNotices();
-    const updated = notices.filter((n) => n.id !== id);
-
     if (typeof window !== "undefined") {
-      localStorage.setItem("student_notices", JSON.stringify(updated));
+      const stored = localStorage.getItem("student_notices");
+      if (stored) {
+        const allNotices = JSON.parse(stored) as NoticeItem[];
+        const updated = allNotices.filter((n) => n.id !== id);
+        localStorage.setItem("student_notices", JSON.stringify(updated));
+      }
     }
 
     if (this.isFirebaseConnected && this.db) {
       try {
-        await deleteDoc(doc(this.db, "users", this.userId, "notices", id));
+        await deleteDoc(doc(this.db, "shared_notices", id));
       } catch (e) {
         console.warn("Error deleting notice from Firebase:", e);
       }
@@ -1045,6 +1313,7 @@ class StorageService {
             id: docSnap.id,
             name: data.name || "Unknown Student",
             avatarUrl: data.avatarUrl || "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=256",
+            semester: data.semester || "",
           });
         });
 
@@ -1070,7 +1339,7 @@ class StorageService {
             const exists = DEFAULT_STUDENT_LIST.some((s) => s.name === localProfile.name);
             if (!exists) {
               return [
-                { id: this.userId, name: localProfile.name, avatarUrl: localProfile.avatarUrl || "" },
+                { id: this.userId, name: localProfile.name, avatarUrl: localProfile.avatarUrl || "", semester: localProfile.semester || "" },
                 ...DEFAULT_STUDENT_LIST,
               ];
             }
@@ -1276,6 +1545,217 @@ class StorageService {
     }
 
     return unsubscribers;
+  }
+
+  // Shared Tasks operations for Admin Dashboard
+  public async getSharedTasks(semester: string): Promise<TaskItem[]> {
+    const list: TaskItem[] = [];
+    if (this.isFirebaseConnected && this.db) {
+      try {
+        const q = query(collection(this.db, "shared_tasks"), where("semester", "==", semester));
+        const querySnapshot = await getDocs(q);
+        querySnapshot.forEach((doc) => {
+          list.push({ id: doc.id, ...doc.data() } as TaskItem);
+        });
+      } catch (e) {
+        console.warn("Error fetching shared tasks:", e);
+      }
+    } else if (typeof window !== "undefined") {
+      const stored = localStorage.getItem("student_shared_tasks");
+      if (stored) {
+        const allShared = JSON.parse(stored) as TaskItem[];
+        return allShared.filter(t => t.semester === semester);
+      }
+    }
+    return list;
+  }
+
+  public async saveSharedTask(task: TaskItem): Promise<void> {
+    const processedAttachments = task.attachments ? await Promise.all(task.attachments.map(async (attach) => {
+      if (attach.content && attach.content.startsWith("data:")) {
+        const fileKey = `task_attach_${task.id}_${attach.name}`;
+        await this.indexedDB.setItem(fileKey, attach.content);
+        return { ...attach, content: `indexeddb:${fileKey}` };
+      }
+      return attach;
+    })) : undefined;
+
+    const taskToSave = {
+      ...task,
+      ...(processedAttachments && { attachments: processedAttachments }),
+    };
+
+    if (typeof window !== "undefined") {
+      let sharedTasks: TaskItem[] = [];
+      const stored = localStorage.getItem("student_shared_tasks");
+      if (stored) sharedTasks = JSON.parse(stored);
+      const index = sharedTasks.findIndex(t => t.id === task.id);
+      if (index >= 0) {
+        sharedTasks[index] = taskToSave;
+      } else {
+        sharedTasks.push(taskToSave);
+      }
+      localStorage.setItem("student_shared_tasks", JSON.stringify(sharedTasks));
+    }
+
+    if (this.isFirebaseConnected && this.db) {
+      try {
+        await setDoc(doc(this.db, "shared_tasks", task.id), taskToSave);
+      } catch (e) {
+        console.warn("Error saving shared task to Firebase:", e);
+      }
+    }
+  }
+
+  public async deleteSharedTask(id: string): Promise<void> {
+    if (typeof window !== "undefined") {
+      let sharedTasks: TaskItem[] = [];
+      const stored = localStorage.getItem("student_shared_tasks");
+      if (stored) sharedTasks = JSON.parse(stored);
+      const updated = sharedTasks.filter(t => t.id !== id);
+      localStorage.setItem("student_shared_tasks", JSON.stringify(updated));
+    }
+
+    if (this.isFirebaseConnected && this.db) {
+      try {
+        await deleteDoc(doc(this.db, "shared_tasks", id));
+      } catch (e) {
+        console.warn("Error deleting shared task from Firebase:", e);
+      }
+    }
+  }
+
+  // Shared Notes operations for Admin Dashboard
+  public async getSharedNotes(semester: string): Promise<NoteItem[]> {
+    const list: NoteItem[] = [];
+    if (this.isFirebaseConnected && this.db) {
+      try {
+        const q = query(collection(this.db, "shared_notes"), where("semester", "==", semester));
+        const querySnapshot = await getDocs(q);
+        querySnapshot.forEach((doc) => {
+          list.push({ id: doc.id, ...doc.data() } as NoteItem);
+        });
+      } catch (e) {
+        console.warn("Error fetching shared notes:", e);
+      }
+    } else if (typeof window !== "undefined") {
+      const stored = localStorage.getItem("student_shared_notes");
+      if (stored) {
+        const allShared = JSON.parse(stored) as NoteItem[];
+        return allShared.filter(n => n.semester === semester);
+      }
+    }
+    return list;
+  }
+
+  public async saveSharedNote(note: NoteItem): Promise<void> {
+    const processedAttachments = note.attachments ? await Promise.all(note.attachments.map(async (attach) => {
+      if (attach.dataUrl && attach.dataUrl.startsWith("data:")) {
+        const fileKey = `note_file_${note.id}_${attach.name}`;
+        await this.indexedDB.setItem(fileKey, attach.dataUrl);
+        return { ...attach, dataUrl: `indexeddb:${fileKey}` };
+      }
+      return attach;
+    })) : undefined;
+
+    const noteToSave = {
+      ...note,
+      ...(processedAttachments && { attachments: processedAttachments })
+    };
+
+    if (typeof window !== "undefined") {
+      let sharedNotes: NoteItem[] = [];
+      const stored = localStorage.getItem("student_shared_notes");
+      if (stored) sharedNotes = JSON.parse(stored);
+      const index = sharedNotes.findIndex(n => n.id === note.id);
+      if (index >= 0) {
+        sharedNotes[index] = noteToSave;
+      } else {
+        sharedNotes.push(noteToSave);
+      }
+      localStorage.setItem("student_shared_notes", JSON.stringify(sharedNotes));
+    }
+
+    if (this.isFirebaseConnected && this.db) {
+      try {
+        await setDoc(doc(this.db, "shared_notes", note.id), noteToSave);
+      } catch (e) {
+        console.warn("Error saving shared note to Firebase:", e);
+      }
+    }
+  }
+
+  public async deleteSharedNote(id: string): Promise<void> {
+    if (typeof window !== "undefined") {
+      let sharedNotes: NoteItem[] = [];
+      const stored = localStorage.getItem("student_shared_notes");
+      if (stored) sharedNotes = JSON.parse(stored);
+      const updated = sharedNotes.filter(n => n.id !== id);
+      localStorage.setItem("student_shared_notes", JSON.stringify(updated));
+    }
+
+    if (this.isFirebaseConnected && this.db) {
+      try {
+        await deleteDoc(doc(this.db, "shared_notes", id));
+      } catch (e) {
+        console.warn("Error deleting shared note from Firebase:", e);
+      }
+    }
+  }
+
+  // Aggregates student submissions for shared assignments
+  public async getSharedTasksWithSubmissions(semester: string, students: StudentListItem[]): Promise<TaskItem[]> {
+    const sharedTasks = await this.getSharedTasks(semester);
+    
+    const tasksWithSubmissions = await Promise.all(sharedTasks.map(async (task) => {
+      const allSubmissions: any[] = [];
+      const filteredStudents = students.filter(st => st.semester === semester);
+      
+      for (const student of filteredStudents) {
+        try {
+          let studentTask: TaskItem | null = null;
+          if (this.isFirebaseConnected && this.db) {
+            const docRef = doc(this.db, "users", student.id, "tasks", task.id);
+            const docSnap = await getDoc(docRef);
+            if (docSnap.exists()) {
+              studentTask = docSnap.data() as TaskItem;
+            }
+          } else {
+            const key = `student_tasks_${student.id}`;
+            const stored = localStorage.getItem(key);
+            if (stored) {
+              const tasksList = JSON.parse(stored) as TaskItem[];
+              studentTask = tasksList.find(t => t.id === task.id) || null;
+            } else if (student.id === this.userId) {
+              const storedSelf = localStorage.getItem("student_tasks");
+              if (storedSelf) {
+                const tasksList = JSON.parse(storedSelf) as TaskItem[];
+                studentTask = tasksList.find(t => t.id === task.id) || null;
+              }
+            }
+          }
+          
+          if (studentTask && studentTask.submissions && studentTask.submissions.length > 0) {
+            studentTask.submissions.forEach(sub => {
+              allSubmissions.push({
+                ...sub,
+                studentName: student.name,
+                studentId: student.id
+              });
+            });
+          }
+        } catch (e) {
+          console.warn(`Error getting task submissions for student ${student.id}:`, e);
+        }
+      }
+      
+      return {
+        ...task,
+        submissions: allSubmissions
+      };
+    }));
+    
+    return tasksWithSubmissions;
   }
 }
 

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import { useTheme } from "./ThemeContext";
 import { dbService } from "../services/firebaseService";
-import type { TimetableClass, TaskItem, NoticeItem, StudentListItem, AttendanceRecord } from "../services/firebaseService";
+import type { TimetableClass, TaskItem, NoticeItem, StudentListItem, AttendanceRecord, NoteItem } from "../services/firebaseService";
 import adminLogo from "../../icons/Admin.png";
 import {
   HomeIcon,
@@ -41,6 +41,7 @@ export const AdminDashboard: React.FC = () => {
   const { theme, toggleTheme, portalMode, setPortalMode } = useTheme();
   const [activeSubView, setActiveSubView] = useState<AdminSubView>("overview");
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+  const [adminSelectedSemester, setAdminSelectedSemester] = useState<string>("1");
 
 
 
@@ -151,19 +152,23 @@ export const AdminDashboard: React.FC = () => {
       const roster = await dbService.getStudentList();
       setStudents(roster);
 
-      const clsList = await dbService.getClasses();
+      const clsList = await dbService.getClasses(adminSelectedSemester);
       setClasses(clsList);
-      if (clsList.length > 0 && !selectedCourse) {
-        setSelectedCourse(clsList[0].name);
+      if (clsList.length > 0) {
+        if (!selectedCourse || !clsList.some(c => c.name === selectedCourse)) {
+          setSelectedCourse(clsList[0].name);
+        }
+      } else {
+        setSelectedCourse("");
       }
 
-      const tList = await dbService.getTasks();
+      const tList = await dbService.getSharedTasksWithSubmissions(adminSelectedSemester, roster);
       setTasks(tList);
 
-      const nList = await dbService.getNotices();
+      const nList = await dbService.getNotices(adminSelectedSemester);
       setNotices(nList);
 
-      const noteList = await dbService.getNotes();
+      const noteList = await dbService.getSharedNotes(adminSelectedSemester);
       setNotes(noteList);
     } catch (e) {
       console.error(e);
@@ -174,13 +179,21 @@ export const AdminDashboard: React.FC = () => {
     const unsubStudents = dbService.subscribeStudentList(setStudents);
     const unsubClasses = dbService.subscribeClasses((clsList) => {
       setClasses(clsList);
-      if (clsList.length > 0 && !selectedCourse) {
-        setSelectedCourse(clsList[0].name);
+      if (clsList.length > 0) {
+        if (!selectedCourse || !clsList.some(c => c.name === selectedCourse)) {
+          setSelectedCourse(clsList[0].name);
+        }
+      } else {
+        setSelectedCourse("");
       }
-    });
-    const unsubTasks = dbService.subscribeTasks(setTasks);
-    const unsubNotices = dbService.subscribeNotices(setNotices);
-    const unsubNotes = dbService.subscribeNotes(setNotes);
+    }, adminSelectedSemester);
+    const unsubTasks = dbService.subscribeTasks(async () => {
+      const roster = await dbService.getStudentList();
+      const tList = await dbService.getSharedTasksWithSubmissions(adminSelectedSemester, roster);
+      setTasks(tList);
+    }, adminSelectedSemester);
+    const unsubNotices = dbService.subscribeNotices(setNotices, adminSelectedSemester);
+    const unsubNotes = dbService.subscribeNotes(setNotes, adminSelectedSemester);
 
     if (!unsubStudents || !unsubClasses || !unsubTasks || !unsubNotices || !unsubNotes) {
       reloadData();
@@ -193,7 +206,7 @@ export const AdminDashboard: React.FC = () => {
       if (unsubNotices) unsubNotices();
       if (unsubNotes) unsubNotes();
     };
-  }, [selectedCourse]);
+  }, [selectedCourse, adminSelectedSemester]);
 
   // Subscribe to all students' attendance in realtime
   useEffect(() => {
@@ -265,7 +278,9 @@ export const AdminDashboard: React.FC = () => {
       const defaults: Record<string, "present" | "absent" | "excused" | "cancelled"> = {};
       const noteDefaults: Record<string, string> = {};
 
-      students.forEach((st) => {
+      const filteredStudents = students.filter(st => st.semester === adminSelectedSemester);
+
+      filteredStudents.forEach((st) => {
         const records = allStudentAttendance[st.id] || [];
         const currentRec = records.find(r => r.courseId === selectedCourse);
         const todayLog = currentRec?.logs.find((l: any) => l.date === attendanceDate);
@@ -281,14 +296,15 @@ export const AdminDashboard: React.FC = () => {
       setAttendanceStatus(prev => ({ ...prev, ...defaults }));
       setAttendanceNotes(prev => ({ ...prev, ...noteDefaults }));
     }
-  }, [selectedCourse, attendanceDate, students, allStudentAttendance]);
+  }, [selectedCourse, attendanceDate, students, allStudentAttendance, adminSelectedSemester]);
 
   // Attendance Submission
   const handleMarkAttendance = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedCourse) return;
     try {
-      for (const st of students) {
+      const filteredStudents = students.filter(st => st.semester === adminSelectedSemester);
+      for (const st of filteredStudents) {
         const status = attendanceStatus[st.id] || "present";
         const note = attendanceNotes[st.id] || "";
         await dbService.markStudentAttendance(selectedCourse, st.id, attendanceDate, status, note);
@@ -312,7 +328,8 @@ export const AdminDashboard: React.FC = () => {
         title: newNoticeTitle,
         description: newNoticeDesc,
         date: "Today",
-        type: newNoticeType
+        type: newNoticeType,
+        semester: adminSelectedSemester
       };
       await dbService.saveNotice(notice);
       setNewNoticeTitle("");
@@ -382,12 +399,13 @@ export const AdminDashboard: React.FC = () => {
       return;
     }
     try {
-      const note = {
+      const note: NoteItem = {
         id: `note_${Date.now()}`,
         title: newNoteTitle,
         content: `Attached PDF: ${newNoteFile.name}`,
         category: newNoteCategory || "General",
         updatedAt: new Date().toISOString(),
+        semester: adminSelectedSemester,
         attachments: [
           {
             name: newNoteFile.name,
@@ -397,7 +415,7 @@ export const AdminDashboard: React.FC = () => {
           }
         ]
       };
-      await dbService.saveNote(note);
+      await dbService.saveSharedNote(note);
       setNewNoteTitle("");
       setNewNoteCategory("");
       setNewNoteFile(null);
@@ -415,7 +433,7 @@ export const AdminDashboard: React.FC = () => {
 
   const handleDeleteNote = async (id: string) => {
     try {
-      await dbService.deleteNote(id);
+      await dbService.deleteSharedNote(id);
       reloadData();
     } catch (err) {
       console.error(err);
@@ -434,7 +452,8 @@ export const AdminDashboard: React.FC = () => {
         day: classDay,
         startTime: classStart,
         endTime: classEnd,
-        color: classColor
+        color: classColor,
+        semester: adminSelectedSemester
       };
       await dbService.saveClass(newClass);
       setClassTitle("");
@@ -471,9 +490,10 @@ export const AdminDashboard: React.FC = () => {
         priority: "medium",
         category: taskCategory,
         status: "todo",
+        semester: adminSelectedSemester,
         attachments: taskAttachment ? [taskAttachment] : []
       };
-      await dbService.saveTask(newTask);
+      await dbService.saveSharedTask(newTask);
       setTaskTitle("");
       setTaskDueDate("");
       setTaskDesc("");
@@ -527,7 +547,7 @@ export const AdminDashboard: React.FC = () => {
 
   const handleDeleteTask = async (id: string) => {
     try {
-      await dbService.deleteTask(id);
+      await dbService.deleteSharedTask(id);
       reloadData();
     } catch (err) {
       console.error(err);
@@ -746,13 +766,29 @@ export const AdminDashboard: React.FC = () => {
                 className="w-full pl-10 pr-4 py-2.5 rounded-full border border-slate-200 dark:border-white/10 bg-slate-100 dark:bg-white/5 text-xs focus:outline-none focus:ring-2 focus:ring-rose-500/30 text-gray-900 dark:text-white placeholder-slate-400 dark:placeholder-white/25 font-medium transition-colors"
               />
             </div>
+
+            {/* Semester Selector */}
+            <div className="flex items-center gap-2 ml-2 shrink-0">
+              <span className="text-[10px] font-bold text-slate-500 dark:text-white/40 uppercase tracking-wider hidden md:inline">Semester:</span>
+              <select
+                value={adminSelectedSemester}
+                onChange={(e) => setAdminSelectedSemester(e.target.value)}
+                className="px-3 py-1.5 rounded-xl border border-slate-200 dark:border-white/10 bg-slate-150 dark:bg-white/5 text-xs font-bold text-slate-700 dark:text-white focus:outline-none focus:ring-2 focus:ring-rose-500/30 cursor-pointer"
+              >
+                {[1, 2, 3, 4, 5, 6, 7, 8].map((sem) => (
+                  <option key={sem} value={sem.toString()} className="bg-white dark:bg-gray-900 text-gray-900 dark:text-white">
+                    Semester {sem}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
 
           <div className="flex items-center gap-4">
             <div className="flex items-center gap-1.5">
               <span className="text-[10px] font-bold text-slate-500 dark:text-white/25 uppercase tracking-wider mr-1 hidden lg:inline">Students</span>
               <div className="flex -space-x-2">
-                {students.map(st => (
+                {students.filter(st => st.semester === adminSelectedSemester).map(st => (
                   <div
                     key={st.id}
                     className="w-8 h-8 rounded-full border-2 border-white dark:border-[#0a0f1e] overflow-hidden bg-rose-100 dark:bg-rose-900"
@@ -909,7 +945,9 @@ export const AdminDashboard: React.FC = () => {
                   <div className="bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-[24px] p-5 grid grid-cols-3 gap-2 text-center transition-colors duration-300">
                     <div>
                       <span className="text-[9px] font-bold text-slate-500 dark:text-white/30 uppercase">Students</span>
-                      <p className="text-base font-black text-gray-900 dark:text-white mt-0.5">{students.length}</p>
+                      <p className="text-base font-black text-gray-900 dark:text-white mt-0.5">
+                        {students.filter(st => st.semester === adminSelectedSemester).length}
+                      </p>
                     </div>
                     <div>
                       <span className="text-[9px] font-bold text-slate-500 dark:text-white/30 uppercase">Assignments</span>
@@ -1062,7 +1100,7 @@ export const AdminDashboard: React.FC = () => {
                   </div>
 
                   <div className="divide-y divide-gray-100 dark:divide-gray-800">
-                    {students.map(st => (
+                    {students.filter(st => st.semester === adminSelectedSemester).map(st => (
                       <div key={st.id} className="grid grid-cols-12 p-3.5 items-center gap-2">
                         
                         <div className="col-span-4 flex items-center gap-3">
@@ -1633,6 +1671,11 @@ export const AdminDashboard: React.FC = () => {
                                     {sub.name}
                                   </a>
                                   <span className="text-[8px] text-gray-400 font-semibold shrink-0">({sub.size})</span>
+                                  {sub.studentName && (
+                                    <span className="text-[9px] font-semibold text-gray-600 dark:text-gray-400 ml-1.5 shrink-0">
+                                      - {sub.studentName}
+                                    </span>
+                                  )}
                                 </div>
                                 <span className="text-[8px] text-gray-400 dark:text-gray-500 font-bold shrink-0">{new Date(sub.submittedAt).toLocaleDateString()}</span>
                               </div>

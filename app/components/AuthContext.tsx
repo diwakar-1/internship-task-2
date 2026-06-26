@@ -113,7 +113,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       avatarUrl: profileData.avatarUrl || user.photoURL || "",
       bio: profileData.bio || "",
       email: profileData.email || user.email || "",
-      enrollmentYear: profileData.enrollmentYear || "",
+      semester: profileData.semester || "",
       department: profileData.department || "",
     };
 

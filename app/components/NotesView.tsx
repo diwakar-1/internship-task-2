@@ -45,6 +45,7 @@ export const NotesView: React.FC = () => {
   const [attachments, setAttachments] = useState<Array<{ name: string; type: string; size: string; dataUrl?: string }>>([]);
 
   const [editorMode, setEditorMode] = useState<"edit" | "preview" | "split">("split");
+  const [selectedNoteIsShared, setSelectedNoteIsShared] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const pdfAttachment = attachments.find(
@@ -80,6 +81,10 @@ export const NotesView: React.FC = () => {
     setContent(note.content);
     setCategory(note.category);
     setAttachments(note.attachments || []);
+    setSelectedNoteIsShared(!!note.isShared);
+    if (note.isShared) {
+      setEditorMode("preview");
+    }
   };
 
   const handleCreateNote = async () => {
@@ -325,7 +330,7 @@ export const NotesView: React.FC = () => {
             
             <div className="flex flex-wrap items-center justify-between gap-4 pb-4 border-b border-gray-100 dark:border-gray-800/60 mb-4 shrink-0">
               <div className="flex-1 min-w-[200px] flex items-center gap-3">
-                {isStudent ? (
+                {isStudent || selectedNoteIsShared ? (
                   <span className="text-base font-bold text-gray-950 dark:text-white py-1 block w-full truncate">{title}</span>
                 ) : (
                   <input
@@ -339,7 +344,7 @@ export const NotesView: React.FC = () => {
                 )}
 
                 
-                {isStudent ? (
+                {isStudent || selectedNoteIsShared ? (
                   <span className="px-2.5 py-1 rounded-full text-[10px] font-extrabold bg-blue-50 dark:bg-blue-950/20 text-blue-600 dark:text-blue-400 border border-blue-100/50 dark:border-blue-900/30 whitespace-nowrap">
                     {category}
                   </span>
@@ -374,7 +379,7 @@ export const NotesView: React.FC = () => {
 
               
               <div className="flex items-center gap-2">
-                {isStudent ? (
+                {isStudent || selectedNoteIsShared ? (
                   <button
                     onClick={() => {
                       const printWindow = window.open('', '_blank');
@@ -454,7 +459,7 @@ export const NotesView: React.FC = () => {
               ) : (
                 <>
                   
-                  {!isStudent && (editorMode === "edit" || (editorMode === "split" && typeof window !== "undefined" && window.innerWidth >= 768)) && (
+                  {!(isStudent || selectedNoteIsShared) && (editorMode === "edit" || (editorMode === "split" && typeof window !== "undefined" && window.innerWidth >= 768)) && (
                     <div className="flex-1 flex flex-col h-full min-h-0">
                       <textarea
                         value={content}
@@ -467,7 +472,7 @@ export const NotesView: React.FC = () => {
                   )}
 
                   
-                  {(isStudent || editorMode === "preview" || editorMode === "split") && (
+                  {(isStudent || selectedNoteIsShared || editorMode === "preview" || editorMode === "split") && (
                     <div className="flex-1 p-4 rounded-2xl bg-white dark:bg-gray-900/20 border border-gray-100 dark:border-gray-800/50 overflow-y-auto prose dark:prose-invert max-w-none text-left leading-relaxed">
                       {content ? (
                         <div
@@ -491,7 +496,7 @@ export const NotesView: React.FC = () => {
                   <span>Attachments ({attachments.length})</span>
                 </span>
 
-                {!isStudent && (
+                {!(isStudent || selectedNoteIsShared) && (
                   <>
                     <button
                       onClick={() => fileInputRef.current?.click()}
@@ -537,7 +542,7 @@ export const NotesView: React.FC = () => {
                       </a>
                     )}
 
-                    {!isStudent && (
+                    {!(isStudent || selectedNoteIsShared) && (
                       <button
                         onClick={() => handleRemoveAttachment(index)}
                         className="p-1 text-gray-400 hover:text-red-500 rounded-md"

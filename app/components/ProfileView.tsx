@@ -25,6 +25,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ profile, onProfileUpda
   const [role, setRole] = useState(profile.role);
   const [avatarUrl, setAvatarUrl] = useState(profile.avatarUrl);
   const [bio, setBio] = useState(profile.bio);
+  const [semester, setSemester] = useState(profile.semester || "");
 
   const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
@@ -52,6 +53,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ profile, onProfileUpda
     setRole(profile.role);
     setAvatarUrl(profile.avatarUrl);
     setBio(profile.bio);
+    setSemester(profile.semester || "");
   }, [profile]);
 
   const handleSaveProfile = async (e: React.FormEvent) => {
@@ -62,7 +64,8 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ profile, onProfileUpda
       name,
       role,
       avatarUrl,
-      bio
+      bio,
+      semester
     };
 
     await dbService.saveProfile(updatedProfile);
@@ -189,6 +192,23 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ profile, onProfileUpda
                 className="w-full px-4 py-2.5 rounded-xl border border-gray-100 dark:border-gray-800/80 bg-gray-50 dark:bg-gray-950 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 text-gray-900 dark:text-white font-medium"
                 required
               />
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-gray-500 dark:text-gray-400 mb-1.5">Semester</label>
+              <select
+                value={semester}
+                onChange={(e) => setSemester(e.target.value)}
+                className="w-full px-4 py-2.5 rounded-xl border border-gray-100 dark:border-gray-800/80 bg-gray-50 dark:bg-gray-950 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 text-gray-900 dark:text-white font-medium"
+                required
+              >
+                <option value="">Select Semester</option>
+                {[1, 2, 3, 4, 5, 6, 7, 8].map((sem) => (
+                  <option key={sem} value={sem.toString()}>
+                    Semester {sem}
+                  </option>
+                ))}
+              </select>
             </div>
 
             <div>

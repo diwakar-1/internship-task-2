@@ -11,7 +11,7 @@ export const ProfileSetup: React.FC = () => {
   const [role, setRole] = useState("");
   const [bio, setBio] = useState("");
   const [department, setDepartment] = useState("");
-  const [enrollmentYear, setEnrollmentYear] = useState("");
+  const [semester, setSemester] = useState("");
 
   const handleSubmit = async () => {
     if (!name || !role) return;
@@ -24,7 +24,7 @@ export const ProfileSetup: React.FC = () => {
         bio,
         email: user?.email || "",
         department,
-        enrollmentYear,
+        semester,
       });
     } finally {
       setSaving(false);
@@ -137,19 +137,18 @@ export const ProfileSetup: React.FC = () => {
               <div>
                 <label className="flex items-center gap-1.5 text-xs font-bold text-gray-500 dark:text-gray-400 mb-1.5">
                   <Calendar className="w-3.5 h-3.5" />
-                  Enrollment Year
+                  Semester
                 </label>
                 <select
-                  value={enrollmentYear}
-                  onChange={(e) => setEnrollmentYear(e.target.value)}
+                  value={semester}
+                  onChange={(e) => setSemester(e.target.value)}
                   className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-white/10 bg-white dark:bg-white/5 text-sm font-medium text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400 transition-all"
+                  required
                 >
-                  <option value="">Select year</option>
-                  <option value="2026">2026</option>
-                  <option value="2025">2025</option>
-                  <option value="2024">2024</option>
-                  <option value="2023">2023</option>
-                  <option value="2022">2022</option>
+                  <option value="">Select semester</option>
+                  {[1, 2, 3, 4, 5, 6, 7, 8].map(sem => (
+                    <option key={sem} value={sem.toString()}>Semester {sem}</option>
+                  ))}
                 </select>
               </div>
 
