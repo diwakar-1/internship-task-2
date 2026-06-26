@@ -19,11 +19,8 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     if (typeof window !== "undefined") {
       const savedTheme = localStorage.getItem("theme") as Theme;
       if (savedTheme) return savedTheme;
-      
-      const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
-      return prefersDark ? "dark" : "light";
     }
-    return "light";
+    return "light"; // Default to light mode
   });
 
   const [currentView, setCurrentView] = useState<View>("dashboard");
@@ -32,7 +29,7 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       const savedMode = localStorage.getItem("portalMode") as "student" | "admin";
       if (savedMode) return savedMode;
     }
-    return "admin"; // Default to admin portal as requested
+    return "student"; // Default to student portal
   });
 
   const setPortalMode = (mode: "student" | "admin") => {
