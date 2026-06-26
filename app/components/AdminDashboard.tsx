@@ -110,11 +110,11 @@ export const AdminDashboard: React.FC = () => {
         totalPresent += rec.presentCount;
       });
     });
-    return totalLogs > 0 ? Math.round((totalPresent / totalLogs) * 1000) / 10 : 0;
+    return totalLogs > 0 ? Math.round((totalPresent / totalLogs) * 1000) / 10 : null;
   };
 
   const overallAdminRate = getOverallAttendanceRate();
-  const graphY = 70 - ((overallAdminRate / 100) * 58);
+  const graphY = overallAdminRate !== null ? 70 - ((overallAdminRate / 100) * 58) : 70;
 
   const getClassAttendanceStats = () => {
     const courseStats: Record<string, { totalPresent: number; totalLogs: number }> = {};
@@ -146,11 +146,11 @@ export const AdminDashboard: React.FC = () => {
 
     const topClass = sortedDesc.length > 0
       ? sortedDesc[0]
-      : { name: "PSP", rate: 92 };
+      : null;
 
     const attentionRequired = sortedAsc.length > 0
       ? sortedAsc[0]
-      : { name: "Leadership", rate: 33 };
+      : null;
 
     return { topClass, attentionRequired };
   };
@@ -903,40 +903,50 @@ export const AdminDashboard: React.FC = () => {
                     <h2 className="text-sm font-extrabold text-slate-600 dark:text-white/50 mt-2">Overall Student Rate</h2>
 
                     <div className="flex items-baseline gap-3 mt-1.5">
-                      <span className="text-4xl font-black tracking-tight text-gray-900 dark:text-white font-display">{overallAdminRate}%</span>
+                      <span className="text-4xl font-black tracking-tight text-gray-900 dark:text-white font-display">
+                        {overallAdminRate !== null ? `${overallAdminRate}%` : "—"}
+                      </span>
                     </div>
                   </div>
 
-                  <div className="w-full h-20 mt-4">
-                    <svg className="w-full h-full overflow-visible" viewBox="0 0 500 80" preserveAspectRatio="none">
-                      <defs>
-                        <linearGradient id="chartGrad" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="0%" stopColor="#f43f5e" stopOpacity="0.25" />
-                          <stop offset="100%" stopColor="#f43f5e" stopOpacity="0.0" />
-                        </linearGradient>
-                      </defs>
-                      <path
-                        d={`M0,60 C125,60 125,${graphY} 250,${graphY} C375,${graphY} 375,60 500,${graphY}`}
-                        fill="none"
-                        stroke="#f43f5e"
-                        strokeWidth="3.5"
-                        strokeLinecap="round"
-                      />
-                      <path
-                        d={`M0,60 C125,60 125,${graphY} 250,${graphY} C375,${graphY} 375,60 500,${graphY} L500,80 L0,80 Z`}
-                        fill="url(#chartGrad)"
-                      />
-                      <circle cx="250" cy={graphY} r="5" fill="#f43f5e" stroke="rgba(255,255,255,0.2)" strokeWidth="2" />
-                    </svg>
-                  </div>
+                  {overallAdminRate !== null ? (
+                    <div className="w-full h-20 mt-4">
+                      <svg className="w-full h-full overflow-visible" viewBox="0 0 500 80" preserveAspectRatio="none">
+                        <defs>
+                          <linearGradient id="chartGrad" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="0%" stopColor="#f43f5e" stopOpacity="0.25" />
+                            <stop offset="100%" stopColor="#f43f5e" stopOpacity="0.0" />
+                          </linearGradient>
+                        </defs>
+                        <path
+                          d={`M0,60 C125,60 125,${graphY} 250,${graphY} C375,${graphY} 375,60 500,${graphY}`}
+                          fill="none"
+                          stroke="#f43f5e"
+                          strokeWidth="3.5"
+                          strokeLinecap="round"
+                        />
+                        <path
+                          d={`M0,60 C125,60 125,${graphY} 250,${graphY} C375,${graphY} 375,60 500,${graphY} L500,80 L0,80 Z`}
+                          fill="url(#chartGrad)"
+                        />
+                        <circle cx="250" cy={graphY} r="5" fill="#f43f5e" stroke="rgba(255,255,255,0.2)" strokeWidth="2" />
+                      </svg>
+                    </div>
+                  ) : (
+                    <div className="w-full h-20 mt-4 flex items-center justify-center text-xs text-slate-400 dark:text-white/20 border border-dashed border-slate-200 dark:border-white/10 rounded-xl">
+                      No attendance data recorded yet
+                    </div>
+                  )}
                 </div>
 
                 <div className="flex flex-col gap-4">
                   <div className="bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-[24px] p-5 flex items-center justify-between transition-colors duration-300">
                     <div>
                       <span className="text-[10px] font-bold text-slate-500 dark:text-white/30 uppercase tracking-wider">Top Class</span>
-                      <h4 className="text-base font-extrabold text-gray-900 dark:text-white mt-1">{topClass.name}</h4>
-                      <p className="text-[10px] text-slate-500 dark:text-white/40 mt-0.5">Average Attendance: {topClass.rate}%</p>
+                      <h4 className="text-base font-extrabold text-gray-900 dark:text-white mt-1">{topClass ? topClass.name : "N/A"}</h4>
+                      <p className="text-[10px] text-slate-500 dark:text-white/40 mt-0.5">
+                        {topClass ? `Average Attendance: ${topClass.rate}%` : "No attendance data"}
+                      </p>
                     </div>
                     <div className="w-9 h-9 rounded-xl bg-emerald-500/15 border border-emerald-500/20 text-emerald-400 flex items-center justify-center font-bold text-sm">
                       ✓
@@ -945,8 +955,10 @@ export const AdminDashboard: React.FC = () => {
                   <div className="bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-[24px] p-5 flex items-center justify-between transition-colors duration-300">
                     <div>
                       <span className="text-[10px] font-bold text-slate-500 dark:text-white/30 uppercase tracking-wider">Attention Required</span>
-                      <h4 className="text-base font-extrabold text-gray-900 dark:text-white mt-1">{attentionRequired.name}</h4>
-                      <p className="text-[10px] text-slate-500 dark:text-white/40 mt-0.5">Average Attendance: {attentionRequired.rate}%</p>
+                      <h4 className="text-base font-extrabold text-gray-900 dark:text-white mt-1">{attentionRequired ? attentionRequired.name : "N/A"}</h4>
+                      <p className="text-[10px] text-slate-500 dark:text-white/40 mt-0.5">
+                        {attentionRequired ? `Average Attendance: ${attentionRequired.rate}%` : "No attendance data"}
+                      </p>
                     </div>
                     <div className="w-9 h-9 rounded-xl bg-rose-500/15 border border-rose-500/20 text-rose-400 flex items-center justify-center font-bold text-sm">
                       !
