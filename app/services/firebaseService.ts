@@ -300,7 +300,7 @@ class StorageService {
   // Listen to classes in realtime
   public subscribeClasses(callback: (classes: TimetableClass[]) => void): (() => void) | null {
     if (this.isFirebaseConnected && this.db) {
-      const colRef = collection(this.db, "users", this.userId, "classes");
+      const colRef = collection(this.db, "classes");
       return onSnapshot(colRef, (querySnapshot) => {
         const list: TimetableClass[] = [];
         querySnapshot.forEach((doc) => {
@@ -442,7 +442,7 @@ class StorageService {
   public async getClasses(): Promise<TimetableClass[]> {
     if (this.isFirebaseConnected && this.db) {
       try {
-        const querySnapshot = await getDocs(collection(this.db, "users", this.userId, "classes"));
+        const querySnapshot = await getDocs(collection(this.db, "classes"));
         const classes: TimetableClass[] = [];
         querySnapshot.forEach((doc) => {
           classes.push({ id: doc.id, ...doc.data() } as TimetableClass);
@@ -478,7 +478,7 @@ class StorageService {
 
     if (this.isFirebaseConnected && this.db) {
       try {
-        await setDoc(doc(this.db, "users", this.userId, "classes", cls.id), cls);
+        await setDoc(doc(this.db, "classes", cls.id), cls);
       } catch (e) {
         console.warn("Error saving class to Firebase:", e);
       }
@@ -501,7 +501,7 @@ class StorageService {
 
     if (this.isFirebaseConnected && this.db) {
       try {
-        await deleteDoc(doc(this.db, "users", this.userId, "classes", id));
+        await deleteDoc(doc(this.db, "classes", id));
       } catch (e) {
         console.warn("Error deleting class from Firebase:", e);
       }
@@ -920,7 +920,7 @@ class StorageService {
         }
         if (this.isFirebaseConnected && this.db) {
           for (const cls of parsed.classes) {
-            await setDoc(doc(this.db, "users", this.userId, "classes", cls.id), cls);
+            await setDoc(doc(this.db, "classes", cls.id), cls);
           }
         }
       }
@@ -1222,7 +1222,7 @@ class StorageService {
 
     // 3. Listen to Classes
     try {
-      const classesRef = collection(this.db, "users", this.userId, "classes");
+      const classesRef = collection(this.db, "classes");
       const unsubClasses = onSnapshot(classesRef, (snapshot) => {
         if (isFirstClasses) {
           isFirstClasses = false;
