@@ -273,8 +273,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigateToView, 
 
                     
                     <g transform="translate(0, -32)">
-                      <rect x="-65" y="-12" width="130" height="26" rx="8" fill="white" className="stroke-gray-100 dark:stroke-gray-800 shadow-lg" filter="drop-shadow(0px 4px 6px rgba(0,0,0,0.06))" />
-                      <text textAnchor="middle" y="5" fontSize="10" fontWeight="bold" fill="#030712" className="dark:fill-white font-sans">
+                      <rect x="-65" y="-12" width="130" height="26" rx="8" className="fill-white dark:fill-gray-800 stroke-gray-100 dark:stroke-gray-800 shadow-lg" filter="drop-shadow(0px 4px 6px rgba(0,0,0,0.06))" />
+                      <text textAnchor="middle" y="5" fontSize="10" fontWeight="bold" className="fill-[#030712] dark:fill-white font-sans">
                         {activeTrend.label}: {activeTrend.rate}
                       </text>
                     </g>
