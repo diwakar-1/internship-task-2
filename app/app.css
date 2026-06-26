@@ -1,15 +1,119 @@
 @import "tailwindcss";
 
+@custom-variant dark (&:where(.dark, .dark *));
+
 @theme {
-  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif,
+  --font-sans: "Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif,
     "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+  --font-display: "Plus Jakarta Sans", var(--font-sans);
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+}
+
+/* Apply display font to all headings and designated layout elements */
+h1, h2, h3, h4, h5, h6, .font-display {
+  font-family: var(--font-display), ui-sans-serif, system-ui, sans-serif;
 }
 
 html,
 body {
-  @apply bg-white dark:bg-gray-950;
+  @apply bg-gray-50/50 dark:bg-gray-950 text-gray-900 dark:text-gray-100;
+  overflow: hidden;
+  height: 100%;
+  width: 100%;
+  color-scheme: light;
+}
 
-  @media (prefers-color-scheme: dark) {
-    color-scheme: dark;
+.dark {
+  color-scheme: dark;
+}
+
+/* Custom Scrollbar Styles for elegant UI */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 9999px;
+}
+
+.dark ::-webkit-scrollbar-thumb {
+  background: #334155;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+.dark ::-webkit-scrollbar-thumb:hover {
+  background: #475569;
+}
+
+/* Custom Utility animations for tab navigation */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
   }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes slideInFromBottom {
+  from {
+    transform: translateY(12px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.animate-in {
+  animation-duration: 250ms;
+  animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.fade-in {
+  animation-name: fadeIn;
+}
+
+.slide-in-from-bottom-3 {
+  animation-name: slideInFromBottom;
+}
+
+.fill-mode-both {
+  animation-fill-mode: both;
+}
+
+/* Custom styles for notes preview markdown rendering */
+.prose h1 {
+  @apply text-lg font-black text-gray-950 dark:text-white mt-6 mb-3;
+}
+.prose h2 {
+  @apply text-base font-bold text-gray-900 dark:text-white mt-5 mb-2.5 border-b border-gray-100 dark:border-gray-800 pb-1;
+}
+.prose h3 {
+  @apply text-sm font-bold text-gray-900 dark:text-white mt-4 mb-2;
+}
+.prose p {
+  @apply text-xs leading-relaxed text-gray-700 dark:text-gray-300 mt-2;
+}
+.prose ul, .prose ol {
+  @apply mt-2 mb-2 pl-4 space-y-1;
+}
+.prose li {
+  @apply text-xs text-gray-700 dark:text-gray-300;
+}
+.prose code {
+  @apply bg-gray-100 dark:bg-gray-800 text-red-500 px-1 py-0.5 rounded font-mono text-[11px];
+}
+.prose strong {
+  @apply font-bold text-gray-950 dark:text-white;
 }
