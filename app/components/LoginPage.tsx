@@ -3,7 +3,7 @@ import { useAuth } from "./AuthContext";
 import campusLogo from "../../icons/Student.png";
 
 export const LoginPage: React.FC = () => {
-  const { signIn } = useAuth();
+  const { signIn, signInAsGuest } = useAuth();
   const [isSigningIn, setIsSigningIn] = useState(false);
 
   const handleSignIn = async () => {
@@ -77,6 +77,19 @@ export const LoginPage: React.FC = () => {
             <span className="text-sm font-bold text-gray-700 dark:text-white/80 group-hover:text-gray-900 dark:group-hover:text-white transition-colors">
               {isSigningIn ? "Signing in..." : "Continue with Google"}
             </span>
+          </button>
+
+          <div className="flex items-center gap-3 my-4">
+            <div className="flex-1 h-[1px] bg-gradient-to-r from-transparent via-gray-200 dark:via-white/10 to-transparent" />
+            <span className="text-[9px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest">or</span>
+            <div className="flex-1 h-[1px] bg-gradient-to-r from-transparent via-gray-200 dark:via-white/10 to-transparent" />
+          </div>
+
+          <button
+            onClick={signInAsGuest}
+            className="w-full flex items-center justify-center gap-2 px-6 py-3.5 bg-indigo-50/50 dark:bg-indigo-950/20 hover:bg-indigo-100/50 dark:hover:bg-indigo-900/30 border border-indigo-100/50 dark:border-indigo-900/30 rounded-2xl shadow-sm hover:shadow-md transition-all duration-300 text-sm font-bold text-indigo-600 dark:text-indigo-400"
+          >
+            Continue in Offline Mode
           </button>
         </div>
       </div>

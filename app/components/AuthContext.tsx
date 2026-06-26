@@ -19,6 +19,7 @@ interface AuthContextType {
   signOut: () => Promise<void>;
   completeProfile: (profileData: Partial<StudentProfile>) => Promise<void>;
   reloadProfile: () => Promise<void>;
+  signInAsGuest: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -50,6 +51,30 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const auth = dbService.getAuth();
     if (!auth) {
       setLoading(false);
+      return;
+    }
+
+    // Check if guest is authenticated
+    const isGuest = typeof window !== "undefined" && localStorage.getItem("guest_authenticated") === "true";
+    if (isGuest) {
+      dbService.setUserId("student_default_user");
+      dbService.getProfile().then((p) => {
+        const guestUser = {
+          uid: "student_default_user",
+          displayName: p.name || "Guest Student",
+          email: p.email || "guest@studentmaker.com",
+          photoURL: p.avatarUrl || ""
+        } as User;
+        setUser(guestUser);
+        if (p && p.name && p.role) {
+          setProfile(p);
+          setIsProfileComplete(true);
+        } else {
+          setProfile(null);
+          setIsProfileComplete(false);
+        }
+        setLoading(false);
+      });
       return;
     }
 
@@ -118,16 +143,49 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const signOut = async () => {
+    if (typeof window !== "undefined") {
+      localStorage.removeItem("guest_authenticated");
+    }
     const auth = dbService.getAuth();
-    if (!auth) return;
-    try {
-      await firebaseSignOut(auth);
+    if (!auth) {
       setUser(null);
       setProfile(null);
       setIsProfileComplete(false);
       dbService.setUserId("student_default_user");
+      return;
+    }
+    try {
+      await firebaseSignOut(auth);
     } catch (error) {
       console.error("Sign-out error:", error);
+    }
+    setUser(null);
+    setProfile(null);
+    setIsProfileComplete(false);
+    dbService.setUserId("student_default_user");
+  };
+
+  const signInAsGuest = async () => {
+    if (typeof window !== "undefined") {
+      localStorage.setItem("guest_authenticated", "true");
+    }
+    dbService.setUserId("student_default_user");
+    const p = await dbService.getProfile();
+    const guestUser = {
+      uid: "student_default_user",
+      displayName: p.name || "Guest Student",
+      email: p.email || "guest@studentmaker.com",
+      photoURL: p.avatarUrl || ""
+    } as User;
+    
+    setUser(guestUser);
+    
+    if (p && p.name && p.role) {
+      setProfile(p);
+      setIsProfileComplete(true);
+    } else {
+      setProfile(null);
+      setIsProfileComplete(false);
     }
   };
 
@@ -159,7 +217,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   return (
-    <AuthContext.Provider value={{ user, loading, isProfileComplete, profile, signIn, signOut, completeProfile, reloadProfile }}>
+    <AuthContext.Provider value={{ user, loading, isProfileComplete, profile, signIn, signOut, completeProfile, reloadProfile, signInAsGuest }}>
       {children}
     </AuthContext.Provider>
   );
