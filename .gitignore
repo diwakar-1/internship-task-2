@@ -1,11 +1,12 @@
 .DS_Store
 .env
 /node_modules/
-
-# React Router
+package.json
+package-lock.json
+docker-compose.yml
+Dockerfile
 /.react-router/
 /build/
 
-# Firebase
 .firebase/
 .vercel
