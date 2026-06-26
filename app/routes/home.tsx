@@ -16,6 +16,7 @@ import { dbService } from "../services/firebaseService";
 import type { StudentProfile } from "../services/firebaseService";
 import { AdminDashboard } from "../components/AdminDashboard";
 
+
 export function meta({ }: Route.MetaArgs) {
   return [
     { title: "Student Maker " },

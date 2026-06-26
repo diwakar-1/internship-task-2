@@ -27,6 +27,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ profile, onProfileUpda
   const [bio, setBio] = useState(profile.bio);
   const [semester, setSemester] = useState(profile.semester || "");
 
+  
   const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;

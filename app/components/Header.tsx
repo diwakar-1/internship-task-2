@@ -42,6 +42,7 @@ export const Header: React.FC<HeaderProps> = ({
         const pending = tasks.filter(t => t.status !== "completed");
         const alerts: string[] = [];
 
+        
         const todayStr = new Date().toISOString().split("T")[0];
         const tomorrow = new Date();
         tomorrow.setDate(tomorrow.getDate() + 1);

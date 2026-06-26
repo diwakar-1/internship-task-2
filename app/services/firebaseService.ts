@@ -242,6 +242,7 @@ class StorageService {
     return false;
   }
 
+  
   public getActiveConfig(): FirebaseConfig | null {
     return this.activeConfig;
   }

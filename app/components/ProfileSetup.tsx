@@ -13,6 +13,7 @@ export const ProfileSetup: React.FC = () => {
   const [department, setDepartment] = useState("");
   const [semester, setSemester] = useState("");
 
+  
   const handleSubmit = async () => {
     if (!name || !role) return;
     setSaving(true);

@@ -32,6 +32,7 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     return "student"; // Default to student portal
   });
 
+  
   const setPortalMode = (mode: "student" | "admin") => {
     setPortalModeState(mode);
     if (typeof window !== "undefined") {

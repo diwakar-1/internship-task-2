@@ -15,6 +15,7 @@ const COLORS = [
   { name: "Amber", value: "bg-amber-50 dark:bg-amber-950/20 text-amber-600 dark:text-amber-400 border-amber-200 dark:border-amber-900/30" },
 ];
 
+
 const getPremiumColorStyle = (colorValue: string) => {
   if (colorValue.includes("red") || colorValue.includes("rose")) {
     return "bg-gradient-to-br from-rose-50/95 to-red-50/70 dark:from-rose-950/30 dark:to-red-950/10 text-rose-600 dark:text-rose-400 border-rose-200/50 dark:border-rose-900/35 shadow-sm shadow-rose-500/5";

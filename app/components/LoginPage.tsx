@@ -15,6 +15,7 @@ export const LoginPage: React.FC = () => {
     }
   };
 
+  
   return (
     <div className="min-h-screen w-full flex items-center justify-center bg-gradient-to-br from-slate-50 via-blue-50/30 to-indigo-50 dark:from-[#070b18] dark:via-[#0a1029] dark:to-[#0d0f25] relative overflow-hidden">
 

@@ -10,6 +10,7 @@ import {
 } from "../services/firebaseService";
 import type { User, StudentProfile } from "../services/firebaseService";
 
+
 interface AuthContextType {
   user: User | null;
   loading: boolean;

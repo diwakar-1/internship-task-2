@@ -66,6 +66,7 @@ export const DoubleCheckIcon: React.FC<IconProps> = ({ size = 100, ...props }) =
   </svg>
 );
 
+
 export const UsersIcon: React.FC<IconProps> = ({ size = 20, ...props }) => (
   <svg 
     xmlns="http://www.w3.org/2000/svg" 

@@ -394,6 +394,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigateToView, 
             <Bell className="w-4 h-4 text-gray-400" />
           </div>
 
+
           <div className="space-y-3 overflow-y-auto flex-1 pr-1">
             {notices.map((notice: NoticeItem) => (
               <div

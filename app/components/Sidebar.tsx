@@ -48,6 +48,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, setIsOpen, profile, av
     },
   ];
 
+  
   return (
     <>
       {isOpen && (

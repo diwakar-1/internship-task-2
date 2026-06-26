@@ -123,6 +123,7 @@ export const AttendanceView: React.FC = () => {
       if (l.status === "cancelled") cancelledCount++;
     });
 
+    
     const updatedRecord: AttendanceRecord = {
       courseId: selectedCourse,
       presentCount,

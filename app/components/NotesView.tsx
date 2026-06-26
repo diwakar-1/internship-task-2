@@ -516,6 +516,7 @@ export const NotesView: React.FC = () => {
                 )}
               </div>
 
+
               
               <div className="flex flex-wrap gap-2 max-h-24 overflow-y-auto py-1">
                 {attachments.map((attach, index) => (

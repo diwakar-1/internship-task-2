@@ -486,7 +486,6 @@ export const TasksView: React.FC = () => {
                           ))}
                         </div>
                       )}
-
                       
                       {isStudent ? (
                         <div className="mt-3 pt-3 border-t border-gray-100 dark:border-gray-800/40">

@@ -102,6 +102,7 @@ export const AdminDashboard: React.FC = () => {
       .filter(st => st.semester === adminSelectedSemester)
       .map(st => st.id);
 
+      
     semesterStudentIds.forEach((studentId) => {
       const records = allStudentAttendance[studentId] || [];
       records.forEach((rec) => {
