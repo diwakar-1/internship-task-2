@@ -34,6 +34,28 @@ const getPremiumColorStyle = (colorValue: string) => {
   return colorValue;
 };
 
+const parseTimeDecimal = (timeStr: string): number => {
+  if (!timeStr) return 0;
+  const clean = timeStr.trim().toLowerCase();
+  const match = clean.match(/^(\d+)(?::(\d+))?\s*(am|pm)?$/);
+  if (!match) return 0;
+  
+  let h = parseInt(match[1], 10);
+  const m = match[2] ? parseInt(match[2], 10) : 0;
+  const isPm = match[3] === "pm";
+  const isAm = match[3] === "am";
+  
+  if (isPm && h < 12) h += 12;
+  if (isAm && h === 12) h = 0;
+  
+  // Auto-detect PM fallback if no AM/PM is specified and hour is 1..7 (since school hours are 8am - 7pm)
+  if (!isAm && !isPm && h >= 1 && h <= 7) {
+    h += 12;
+  }
+  
+  return h + m / 60;
+};
+
 export const TimetableView: React.FC = () => {
   const { portalMode } = useTheme();
   const isStudent = portalMode === "student";
@@ -149,16 +171,14 @@ export const TimetableView: React.FC = () => {
     const matchedClass = classes.find(c => c.id === id);
     
     if (matchedClass) {
-      // Calculate duration of the existing class
-      const [startH, startM] = matchedClass.startTime.split(":").map(Number);
-      const [endH, endM] = matchedClass.endTime.split(":").map(Number);
-      const durationHours = endH - startH + (endM - startM) / 60;
+      const startDecimal = parseTimeDecimal(matchedClass.startTime);
+      const endDecimal = parseTimeDecimal(matchedClass.endTime);
+      const durationHours = endDecimal - startDecimal;
 
-      // Update start time to drop hour, keeping minutes if any
-      const newStartStr = `${targetHour.toString().padStart(2, "0")}:${startM.toString().padStart(2, "0")}`;
+      const startMin = Math.round((startDecimal % 1) * 60);
+      const newStartStr = `${targetHour.toString().padStart(2, "0")}:${startMin.toString().padStart(2, "0")}`;
       
-      // Calculate new end time based on original duration
-      const totalEndMinutes = targetHour * 60 + startM + Math.round(durationHours * 60);
+      const totalEndMinutes = targetHour * 60 + startMin + Math.round(durationHours * 60);
       const newEndHour = Math.floor(totalEndMinutes / 60);
       const newEndMin = totalEndMinutes % 60;
       const newEndStr = `${newEndHour.toString().padStart(2, "0")}:${newEndMin.toString().padStart(2, "0")}`;
@@ -179,16 +199,16 @@ export const TimetableView: React.FC = () => {
   const getClassForSlot = (day: string, hour: number) => {
     return classes.find(c => {
       if (c.day !== day) return false;
-      const [startHour] = c.startTime.split(":").map(Number);
-      return startHour === hour;
+      const startDecimal = parseTimeDecimal(c.startTime);
+      return Math.floor(startDecimal) === hour;
     });
   };
 
   // Calculate grid span of a class (based on duration in hours)
   const getClassDurationSpan = (cls: TimetableClass) => {
-    const [startHour, startMin] = cls.startTime.split(":").map(Number);
-    const [endHour, endMin] = cls.endTime.split(":").map(Number);
-    const diff = (endHour - startHour) + (endMin - startMin) / 60;
+    const startDecimal = parseTimeDecimal(cls.startTime);
+    const endDecimal = parseTimeDecimal(cls.endTime);
+    const diff = endDecimal - startDecimal;
     return Math.max(1, Math.round(diff));
   };
 
