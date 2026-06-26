@@ -98,7 +98,12 @@ export const AdminDashboard: React.FC = () => {
   const getOverallAttendanceRate = () => {
     let totalLogs = 0;
     let totalPresent = 0;
-    Object.values(allStudentAttendance).forEach((records) => {
+    const semesterStudentIds = students
+      .filter(st => st.semester === adminSelectedSemester)
+      .map(st => st.id);
+
+    semesterStudentIds.forEach((studentId) => {
+      const records = allStudentAttendance[studentId] || [];
       records.forEach((rec) => {
         totalLogs += rec.presentCount + rec.absentCount;
         totalPresent += rec.presentCount;
@@ -112,8 +117,12 @@ export const AdminDashboard: React.FC = () => {
 
   const getClassAttendanceStats = () => {
     const courseStats: Record<string, { totalPresent: number; totalLogs: number }> = {};
+    const semesterStudentIds = students
+      .filter(st => st.semester === adminSelectedSemester)
+      .map(st => st.id);
 
-    Object.values(allStudentAttendance).forEach((records) => {
+    semesterStudentIds.forEach((studentId) => {
+      const records = allStudentAttendance[studentId] || [];
       records.forEach((rec) => {
         const course = rec.courseId;
         if (!courseStats[course]) {
